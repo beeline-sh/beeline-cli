@@ -1,7 +1,9 @@
 name: release
 
 # Tag `vX.Y.Z` on main to publish binaries; the install script at
-# https://beeline.sh/install picks the latest release.
+# https://beeline.sh/install picks the latest release. The release is
+# created with RELEASE_TOKEN (a personal access token, repo secret) so it
+# is authored by the account that owns the token.
 on:
   push:
     tags: ["v*"]
@@ -57,5 +59,10 @@ jobs:
         run: (cd artifacts && sha256sum beeline_* > checksums.txt)
       - uses: softprops/action-gh-release@v2
         with:
+          token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          name: ${{ github.ref_name }}
+          body: |
+            Beeline CLI ${{ github.ref_name }}.
+
+            Install: curl -fsSL https://beeline.sh/install | sh
           files: artifacts/*
-          generate_release_notes: true
