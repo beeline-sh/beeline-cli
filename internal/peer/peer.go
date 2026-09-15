@@ -9,12 +9,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"sync/atomic"
 	"time"
 
 	"go.beeline.sh/cli/internal/config"
 	"go.beeline.sh/cli/internal/link"
 	"go.beeline.sh/cli/internal/manifest"
+	"go.beeline.sh/cli/internal/portmap"
 	"go.beeline.sh/cli/internal/signal"
 	"go.beeline.sh/cli/internal/transport"
 	"go.beeline.sh/cli/internal/wire"
@@ -87,6 +90,15 @@ func Receive(ctx context.Context, cfg config.Config, l link.Link, destDir string
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	// A router mapping makes the reverse-dial listener reachable for browser
+	// hosts behind a port-restricted NAT. Discovery is quick; wait briefly.
+	pm := portmap.Start(ctx, ep.Port(), log.New(io.Discard, "", 0))
+	defer pm.Close()
+	for i := 0; i < 20 && pm.Kind() == "none" && pm.ExternalAddr() == ""; i++ {
+		time.Sleep(100 * time.Millisecond)
+	}
+	addrs = portmap.Merge(addrs, pm.ExternalAddr())
 
 	// We listen too: a browser host cannot, so it dials us (reverse dial).
 	lst, err := transport.NewListener(ctx, ep)

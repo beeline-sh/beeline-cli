@@ -32,6 +32,14 @@ type Status struct {
 	PID       int    `json:"pid"`
 	Shares    int    `json:"shares"`
 	Restoring bool   `json:"restoring"` // still re-hosting shares from the previous run
+	// PortMapping is the router mapping for the UDP port: kind "upnp",
+	// "nat-pmp" or "none", and the external ip:port when mapped.
+	PortMapping PortMapping `json:"port_mapping"`
+}
+
+type PortMapping struct {
+	Kind     string `json:"kind"`
+	External string `json:"external,omitempty"`
 }
 
 // ShareRequest is POST /shares.
@@ -151,9 +159,11 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	restoring := s.restoring
 	s.mu.Unlock()
+	kind, ext := s.host.PortMapping()
 	writeJSON(w, 200, Status{
 		Version: config.Version, Server: s.cfg.Server, UptimeS: int64(time.Since(s.start).Seconds()),
 		Port: s.host.Port(), PID: os.Getpid(), Shares: len(s.host.List()), Restoring: restoring,
+		PortMapping: PortMapping{Kind: kind, External: ext},
 	})
 }
 

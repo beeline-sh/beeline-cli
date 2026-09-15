@@ -33,7 +33,7 @@ func NewWebTransportServer(tlsConf *tls.Config, handle func(id string, c Conn)) 
 			_ = sess.CloseWithError(0, "no stream")
 			return
 		}
-		handle(id, NewStreamConn("webtransport", st, nil))
+		handle(id, withRemote(NewStreamConn("webtransport", st, nil), r.RemoteAddr))
 		_ = sess.CloseWithError(0, "")
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

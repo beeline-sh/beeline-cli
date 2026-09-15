@@ -405,13 +405,7 @@ func (sh *Share) handle(ctx context.Context, sig *signal.Client, peer, kind stri
 
 func (sh *Share) manifest() signal.Manifest {
 	cert := sh.h.currentCert()
-	addrs := sh.h.ep.LocalAddrs()
-	sh.h.mu.Lock()
-	pub := sh.h.publicAddr
-	sh.h.mu.Unlock()
-	if pub != "" {
-		addrs = append(addrs, pub)
-	}
+	addrs := sh.h.reachable()
 	sh.mu.Lock()
 	left := sh.downloadsLeft
 	sh.mu.Unlock()

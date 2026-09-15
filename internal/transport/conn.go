@@ -28,6 +28,7 @@ type streamConn struct {
 	br      *bufio.Reader
 	wmu     sync.Mutex
 	onClose func()
+	remote  string
 }
 
 // NewStreamConn wraps a byte stream. onClose (optional) runs after the stream closes.
@@ -36,6 +37,22 @@ func NewStreamConn(kind string, s io.ReadWriteCloser, onClose func()) Conn {
 }
 
 func (c *streamConn) Kind() string { return c.kind }
+
+// withRemote records the peer address on a stream conn (for the AUTH limiter).
+func withRemote(c Conn, addr string) Conn {
+	if sc, ok := c.(*streamConn); ok {
+		sc.remote = addr
+	}
+	return c
+}
+
+// RemoteAddr is the peer address of a stream conn, "" for WebRTC.
+func RemoteAddr(c Conn) string {
+	if sc, ok := c.(*streamConn); ok {
+		return sc.remote
+	}
+	return ""
+}
 
 // withOnClose returns c with fn run after Close, in addition to any
 // existing hook. Non-stream conns are returned unchanged.

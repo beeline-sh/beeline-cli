@@ -15,6 +15,7 @@ import (
 	"go.beeline.sh/cli/internal/api"
 	"go.beeline.sh/cli/internal/config"
 	"go.beeline.sh/cli/internal/link"
+	"go.beeline.sh/cli/internal/portmap"
 	"go.beeline.sh/cli/internal/signal"
 	"go.beeline.sh/cli/internal/transport"
 	"go.beeline.sh/cli/internal/wire"
@@ -27,6 +28,7 @@ type Host struct {
 	cfg     config.Config
 	api     *api.Client
 	ep      *transport.Endpoint
+	pm      *portmap.Mapper
 	wt      *webtransport.Server
 	tlsConf *tls.Config
 	log     *log.Logger
@@ -63,6 +65,7 @@ func New(ctx context.Context, cfg config.Config, logger *log.Logger) (*Host, err
 		},
 	}
 	h.wt = transport.NewWebTransportServer(h.tlsConf, h.handleStream)
+	h.pm = portmap.Start(hctx, ep.Port(), logger)
 
 	ictx, icancel := context.WithTimeout(hctx, 8*time.Second)
 	if info, err := h.api.Info(ictx); err == nil {
@@ -85,6 +88,21 @@ func New(ctx context.Context, cfg config.Config, logger *log.Logger) (*Host, err
 
 // Port is the UDP port in use.
 func (h *Host) Port() int { return h.ep.Port() }
+
+// PortMapping reports the router mapping: kind ("upnp", "nat-pmp", "none")
+// and the external ip:port when mapped.
+func (h *Host) PortMapping() (kind, external string) {
+	return h.pm.Kind(), h.pm.ExternalAddr()
+}
+
+// reachable is every address a peer may dial: interfaces, the STUN-observed
+// public address, and the router mapping (normally the same as STUN).
+func (h *Host) reachable() []string {
+	h.mu.Lock()
+	pub := h.publicAddr
+	h.mu.Unlock()
+	return portmap.Merge(h.ep.LocalAddrs(), pub, h.pm.ExternalAddr())
+}
 
 func (h *Host) currentCert() *transport.Cert {
 	h.mu.Lock()
@@ -150,6 +168,7 @@ func (h *Host) handleStream(id string, c transport.Conn) {
 	if err != nil || f.Type != wire.TAuth || len(f.Payload) != 48 {
 		_ = c.WriteFrame(wire.ErrorFrame(wire.ErrProtocol, "expected AUTH"))
 		c.Close()
+		h.authFailed(c)
 		return
 	}
 	nonce, mac := f.Payload[:16], f.Payload[16:]
@@ -157,6 +176,7 @@ func (h *Host) handleStream(id string, c transport.Conn) {
 	if sh == nil {
 		_ = c.WriteFrame(wire.ErrorFrame(wire.ErrProtocol, "unknown share"))
 		c.Close()
+		h.authFailed(c)
 		return
 	}
 	if sh.exhausted() {
@@ -169,6 +189,14 @@ func (h *Host) handleStream(id string, c transport.Conn) {
 		return
 	}
 	sh.serve(c, "")
+}
+
+// authFailed counts a bad AUTH against the source address; repeated
+// failures get the address blocked for a while (transport.AuthLimiter).
+func (h *Host) authFailed(c transport.Conn) {
+	if addr := transport.RemoteAddr(c); addr != "" && h.ep.Auth.Fail(addr) {
+		h.log.Printf("blocking %s for a minute after repeated bad AUTH", addr)
+	}
 }
 
 func (h *Host) authenticate(id string, nonce, mac []byte) *Share {
@@ -257,5 +285,6 @@ func (h *Host) Close() {
 		sh.stop("gone")
 	}
 	h.cancel()
+	h.pm.Close()
 	_ = h.ep.Close()
 }

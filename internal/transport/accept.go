@@ -109,11 +109,13 @@ func (l *Listener) handleStream(id string, c Conn) {
 	f, err := c.ReadFrame()
 	if err != nil || f.Type != wire.TAuth || len(f.Payload) != 48 {
 		fail("expected AUTH")
+		l.authFailed(c)
 		return
 	}
 	inc := l.authenticate(id, f.Payload[:16], f.Payload[16:])
 	if inc == nil {
 		fail("unknown share")
+		l.authFailed(c)
 		return
 	}
 	f, err = c.ReadFrame()
@@ -133,6 +135,12 @@ func (l *Listener) handleStream(id string, c Conn) {
 		<-closed
 	case <-inc.done:
 		c.Close() // race already decided
+	}
+}
+
+func (l *Listener) authFailed(c Conn) {
+	if addr := RemoteAddr(c); addr != "" {
+		l.ep.Auth.Fail(addr)
 	}
 }
 

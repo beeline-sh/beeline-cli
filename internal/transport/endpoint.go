@@ -27,9 +27,11 @@ const (
 // punching. quic-go hands us every non-QUIC datagram through
 // ReadNonQUICPacket, which is how STUN answers reach us on the same port.
 type Endpoint struct {
-	udp *net.UDPConn
-	tr  *quic.Transport
-	ln  *quic.Listener
+	// Auth blocks addresses that keep failing AUTH (see AuthLimiter).
+	Auth *AuthLimiter
+	udp  *net.UDPConn
+	tr   *quic.Transport
+	ln   *quic.Listener
 
 	stunMu sync.Mutex
 }
@@ -44,7 +46,7 @@ func Listen(port int) (*Endpoint, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Endpoint{udp: udp, tr: &quic.Transport{Conn: udp}}, nil
+	return &Endpoint{udp: udp, tr: &quic.Transport{Conn: udp}, Auth: NewAuthLimiter()}, nil
 }
 
 func (e *Endpoint) Port() int { return e.udp.LocalAddr().(*net.UDPAddr).Port }
@@ -157,6 +159,10 @@ func (e *Endpoint) Serve(ctx context.Context, tlsConf *tls.Config, onStream func
 			}
 			return err
 		}
+		if !e.Auth.Allow(conn.RemoteAddr().String()) {
+			_ = conn.CloseWithError(quic.ApplicationErrorCode(0), "rate limited")
+			continue
+		}
 		switch conn.ConnectionState().TLS.NegotiatedProtocol {
 		case ALPNH3:
 			if wt == nil {
@@ -171,7 +177,7 @@ func (e *Endpoint) Serve(ctx context.Context, tlsConf *tls.Config, onStream func
 					if err != nil {
 						return
 					}
-					go onStream(NewStreamConn("quic", st, nil))
+					go onStream(withRemote(NewStreamConn("quic", st, nil), conn.RemoteAddr().String()))
 				}
 			}()
 		}
