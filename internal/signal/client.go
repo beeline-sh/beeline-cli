@@ -99,11 +99,23 @@ func (c *Client) pingLoop(ctx context.Context) {
 	}
 }
 
+// readTimeout bounds silence on the socket. We ping every 30 s and the
+// server answers each ping, so a quiet socket for this long is dead even if
+// the TCP connection still looks open (a proxy in front of a restarted
+// server does exactly that).
+const readTimeout = 75 * time.Second
+
 // Recv returns the next non-pong frame. Server error frames are returned as *Error.
 func (c *Client) Recv(ctx context.Context) (Message, error) {
 	for {
 		var m Message
-		if err := wsjson.Read(ctx, c.ws, &m); err != nil {
+		rctx, cancel := context.WithTimeout(ctx, readTimeout)
+		err := wsjson.Read(rctx, c.ws, &m)
+		cancel()
+		if err != nil {
+			if ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) {
+				err = errors.New("no frame from the server in 75s")
+			}
 			return Message{}, err
 		}
 		switch m.T {

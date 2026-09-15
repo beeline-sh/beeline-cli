@@ -211,12 +211,14 @@ func (sh *Share) loop(ctx context.Context) {
 				sh.sig = nsig
 				sh.mu.Unlock()
 				backoff = time.Second
+				sh.h.log.Printf("share %s: signaling reconnected", sh.ID)
 				break
 			}
 			if errors.As(err, &serr) && (serr.Code == "not-found" || serr.Code == "gone") {
 				_ = sh.h.Remove(sh.ID, "gone")
 				return
 			}
+			sh.h.log.Printf("share %s: reconnect failed (%v), retrying in %s", sh.ID, err, backoff*2)
 			if backoff < 30*time.Second {
 				backoff *= 2
 			}
