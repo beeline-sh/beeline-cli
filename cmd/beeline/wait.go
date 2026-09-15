@@ -64,7 +64,7 @@ func waitShare(ctx context.Context, cfg config.Config, dc *daemon.Client, id str
 		}
 		if cur == nil {
 			clear(&drawn)
-			fmt.Fprintf(os.Stderr, "  share %s is over (revoked, expired or downloads used up)\n", id)
+			fmt.Fprintf(os.Stderr, "\r\033[K  share %s is over (revoked, expired or downloads used up)\n", id)
 			return nil
 		}
 		seen := map[string]bool{}
@@ -98,7 +98,7 @@ func waitShare(ctx context.Context, cfg config.Config, dc *daemon.Client, id str
 		}
 		clear(&drawn)
 		for _, l := range lines {
-			fmt.Fprintf(os.Stderr, "\033[K%s\n", l)
+			fmt.Fprintf(os.Stderr, "\r\033[K%s\n", l)
 		}
 		drawn = len(lines)
 	}
@@ -112,7 +112,7 @@ func waitShare(ctx context.Context, cfg config.Config, dc *daemon.Client, id str
 // clear moves the cursor back over the lines drawn last time.
 func clear(drawn *int) {
 	if *drawn > 0 {
-		fmt.Fprintf(os.Stderr, "\033[%dA", *drawn)
+		fmt.Fprintf(os.Stderr, "\r\033[%dA", *drawn) // \r: the shell echoes ^C and moves the cursor
 	}
 	*drawn = 0
 }
@@ -123,6 +123,6 @@ func revokeOnExit(dc *daemon.Client, id string) error {
 	if err := dc.Revoke(ctx, id); err != nil {
 		return fmt.Errorf("revoke %s: %w", id, err)
 	}
-	fmt.Fprintf(os.Stderr, "\033[K  revoked %s\n", id)
+	fmt.Fprintf(os.Stderr, "\r\033[K  revoked %s\n", id)
 	return nil
 }
