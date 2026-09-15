@@ -55,7 +55,6 @@ func waitShare(ctx context.Context, cfg config.Config, dc *daemon.Client, id str
 	out("%s\n", waitHint)
 	drawn := 1
 	delivered := 0
-	best := map[string]float64{} // peer -> highest progress seen, to count deliveries
 	for {
 		select {
 		case <-ctx.Done():
@@ -94,21 +93,7 @@ func waitShare(ctx context.Context, cfg config.Config, dc *daemon.Client, id str
 				out("\r\033[K  share %s is over (revoked, expired or downloads used up)\n", id)
 				return nil
 			}
-			seen := map[string]bool{}
-			for _, p := range cur.Peers {
-				seen[p.Peer] = true
-				if p.Progress > best[p.Peer] {
-					best[p.Peer] = p.Progress
-				}
-			}
-			for peer, prog := range best {
-				if !seen[peer] {
-					if prog >= 0.999 {
-						delivered++
-					}
-					delete(best, peer)
-				}
-			}
+			delivered = len(cur.Downloads)
 			lines := make([]string, 0, len(cur.Peers)+1)
 			switch {
 			case len(cur.Peers) == 0 && delivered == 0:
@@ -119,8 +104,18 @@ func waitShare(ctx context.Context, cfg config.Config, dc *daemon.Client, id str
 				for _, p := range cur.Peers {
 					lines = append(lines, fmt.Sprintf("  %s  %-14s %s  %3.0f%%   %s", p.Peer, transportLabel(p.Transport), ui.Bar(p.Progress, 20), p.Progress*100, ui.Rate(p.BPS)))
 				}
-				if delivered > 0 {
-					lines = append(lines, fmt.Sprintf("  delivered %d so far", delivered))
+			}
+			if n := len(cur.Downloads); n > 0 {
+				from := 0
+				if n > 5 {
+					from = n - 5
+				}
+				for _, d := range cur.Downloads[from:] {
+					bps := 0.0
+					if d.Seconds > 0 {
+						bps = float64(d.Bytes) / d.Seconds
+					}
+					lines = append(lines, fmt.Sprintf("  ✓ %s in %s  %s  %s  %s", ui.Size(d.Bytes), ui.Secs(d.Seconds), ui.Rate(bps), transportLabel(d.Transport), ui.Ago(d.FinishedAt)))
 				}
 			}
 			clear(&drawn)

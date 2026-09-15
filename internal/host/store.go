@@ -16,17 +16,18 @@ import (
 // daemon restart (or `beeline update`) keeps links working. The key is the
 // only copy outside the link itself; the file is 0600.
 type Saved struct {
-	ID            string `json:"id"`
-	Token         string `json:"token"`
-	Key           string `json:"key"`
-	Path          string `json:"path"`
-	Name          string `json:"name,omitempty"`
-	ExpiresIn     int64  `json:"expires_in,omitempty"`
-	MaxDownloads  int    `json:"max_downloads,omitempty"`
-	Relay         string `json:"relay,omitempty"`
-	ExpiresAt     int64  `json:"expires_at"`
-	CreatedAt     int64  `json:"created_at"`
-	DownloadsLeft int    `json:"downloads_left"`
+	ID            string     `json:"id"`
+	Token         string     `json:"token"`
+	Key           string     `json:"key"`
+	Path          string     `json:"path"`
+	Name          string     `json:"name,omitempty"`
+	ExpiresIn     int64      `json:"expires_in,omitempty"`
+	MaxDownloads  int        `json:"max_downloads,omitempty"`
+	Relay         string     `json:"relay,omitempty"`
+	ExpiresAt     int64      `json:"expires_at"`
+	CreatedAt     int64      `json:"created_at"`
+	DownloadsLeft int        `json:"downloads_left"`
+	Downloads     []Download `json:"downloads,omitempty"`
 }
 
 func storePath() string { return filepath.Join(config.DataDir(), "shares.json") }

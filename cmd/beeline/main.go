@@ -299,6 +299,7 @@ func cmdGet(ctx context.Context, cfg config.Config, args []string) error {
 	}
 	var lastLine string
 	var header bool
+	var started time.Time
 	render := func(p peer.Progress) {
 		switch p.State {
 		case "connecting":
@@ -309,6 +310,7 @@ func cmdGet(ctx context.Context, cfg config.Config, args []string) error {
 			if !header {
 				fmt.Fprintf(os.Stderr, "\r\033[K  %s   %s   %s\n", p.Name, ui.Size(p.Size), transportLabel(p.Transport))
 				header = true
+				started = time.Now()
 			}
 			frac := 1.0
 			if p.Size > 0 {
@@ -325,7 +327,15 @@ func cmdGet(ctx context.Context, cfg config.Config, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("  ✓ saved to %s   sha256 root %s...\n", p.Path, p.Root[:12])
+	elapsed := time.Since(started)
+	if started.IsZero() {
+		elapsed = 0
+	}
+	if sec := elapsed.Seconds(); sec > 0 && p.Size > 0 {
+		fmt.Printf("  ✓ saved to %s   in %s (%s)   sha256 root %s...\n", p.Path, ui.Secs(sec), ui.Rate(float64(p.Size)/sec), p.Root[:12])
+	} else {
+		fmt.Printf("  ✓ saved to %s   sha256 root %s...\n", p.Path, p.Root[:12])
+	}
 	return nil
 }
 
@@ -348,8 +358,30 @@ func cmdLs(ctx context.Context, cfg config.Config) error {
 		for _, p := range s.Peers {
 			fmt.Printf("          %s  %3.0f%%   %s   %s\n", ui.Bar(p.Progress, 16), p.Progress*100, ui.Rate(p.BPS), transportLabel(p.Transport))
 		}
+		printDownloads(s.Downloads, 5)
 	}
 	return nil
+}
+
+// printDownloads lists the last n finished transfers of a share.
+func printDownloads(ds []host.Download, n int) {
+	if len(ds) == 0 {
+		return
+	}
+	start := 0
+	if len(ds) > n {
+		start = len(ds) - n
+	}
+	for _, d := range ds[start:] {
+		bps := 0.0
+		if d.Seconds > 0 {
+			bps = float64(d.Bytes) / d.Seconds
+		}
+		fmt.Printf("          ✓ %s in %s  %s  %s  %s\n", ui.Size(d.Bytes), ui.Secs(d.Seconds), ui.Rate(bps), transportLabel(d.Transport), ui.Ago(d.FinishedAt))
+	}
+	if start > 0 {
+		fmt.Printf("          (+%d earlier)\n", start)
+	}
 }
 
 func cmdRevoke(ctx context.Context, cfg config.Config, args []string) error {
@@ -391,6 +423,11 @@ func peersLabel(s host.Info) string {
 		b.WriteString("1 peer")
 	default:
 		fmt.Fprintf(&b, "%d peers", n)
+	}
+	if n := len(s.Downloads); n == 1 {
+		b.WriteString(" · 1 delivered")
+	} else if n > 1 {
+		fmt.Fprintf(&b, " · %d delivered", n)
 	}
 	if s.ExpiresAt > 0 {
 		fmt.Fprintf(&b, " · %s left", shortDur(time.Until(time.Unix(s.ExpiresAt, 0))))

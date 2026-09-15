@@ -31,6 +31,18 @@ type PeerInfo struct {
 	BPS       float64 `json:"bps"`
 }
 
+// Download is one finished transfer, kept with the share (and persisted).
+type Download struct {
+	Peer       string  `json:"peer"`
+	Transport  string  `json:"transport"`
+	Bytes      int64   `json:"bytes"`
+	StartedAt  int64   `json:"started_at"`
+	FinishedAt int64   `json:"finished_at"`
+	Seconds    float64 `json:"seconds"`
+}
+
+const maxDownloadsKept = 100
+
 // Info is the daemon-API view of a share.
 type Info struct {
 	ID            string     `json:"id"`
@@ -43,6 +55,7 @@ type Info struct {
 	ExpiresAt     int64      `json:"expires_at"`
 	DownloadsLeft int        `json:"downloads_left"` // -1 = unlimited
 	CreatedAt     int64      `json:"created_at"`
+	Downloads     []Download `json:"downloads"`
 }
 
 // Share is one served path.
@@ -62,6 +75,7 @@ type Share struct {
 	mu            sync.Mutex
 	sig           *signal.Client
 	downloadsLeft int
+	downloads     []Download
 	peers         map[string]*peerState
 	sessions      map[*session]struct{}
 	stopped       bool
@@ -150,6 +164,7 @@ func resumeShare(ctx context.Context, h *Host, s Saved) (*Share, error) {
 		src.Close()
 		return nil, err
 	}
+	sh.downloads = append(sh.downloads, s.Downloads...)
 	if err := sh.start(ctx); err != nil {
 		src.Close()
 		return nil, err
@@ -200,6 +215,7 @@ func (sh *Share) saved() Saved {
 		Path: sh.Src.Path, Name: sh.Opts.Name,
 		ExpiresIn: int64(sh.Opts.ExpiresIn.Seconds()), MaxDownloads: sh.Opts.MaxDownloads, Relay: sh.Opts.Relay,
 		ExpiresAt: sh.ExpiresAt, CreatedAt: sh.CreatedAt.Unix(), DownloadsLeft: sh.downloadsLeft,
+		Downloads: append([]Download(nil), sh.downloads...),
 	}
 }
 
@@ -217,6 +233,7 @@ func (sh *Share) Info() Info {
 		ID: sh.ID, Link: sh.Link.String(), Name: sh.Src.Name, Path: sh.Src.Path,
 		Size: sh.Src.Size, Files: len(sh.Src.Files), ExpiresAt: sh.ExpiresAt,
 		DownloadsLeft: sh.downloadsLeft, CreatedAt: sh.CreatedAt.Unix(), Peers: []PeerInfo{},
+		Downloads: append([]Download{}, sh.downloads...),
 	}
 	for s := range sh.sessions {
 		s.mu.Lock()
@@ -494,7 +511,7 @@ func (sh *Share) serve(c transport.Conn, peer string) {
 				return
 			}
 			s.doneSent = true
-			sh.completed()
+			sh.completed(s)
 		}
 	}
 }
@@ -505,9 +522,22 @@ func (sh *Share) isStopped() bool {
 	return sh.stopped
 }
 
-// completed counts one finished download.
-func (sh *Share) completed() {
+// completed records one finished download and counts it against the cap.
+func (sh *Share) completed(s *session) {
+	now := time.Now()
+	s.mu.Lock()
+	d := Download{Peer: s.peer, Transport: s.conn.Kind(), Bytes: s.sent, StartedAt: s.start.Unix(), FinishedAt: now.Unix(), Seconds: now.Sub(s.start).Seconds()}
+	s.mu.Unlock()
+	if d.Peer == "" {
+		if addr := transport.RemoteAddr(s.conn); addr != "" {
+			d.Peer = addr
+		}
+	}
 	sh.mu.Lock()
+	sh.downloads = append(sh.downloads, d)
+	if len(sh.downloads) > maxDownloadsKept {
+		sh.downloads = sh.downloads[len(sh.downloads)-maxDownloadsKept:]
+	}
 	if sh.downloadsLeft > 0 {
 		sh.downloadsLeft--
 	}

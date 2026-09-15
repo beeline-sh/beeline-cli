@@ -81,3 +81,31 @@ func Duration(s string) (time.Duration, error) {
 	}
 	return time.ParseDuration(s)
 }
+
+// Secs formats a duration in seconds for a finished transfer: "0.6 s", "12 s", "3m 05s".
+func Secs(sec float64) string {
+	switch {
+	case sec < 1:
+		return fmt.Sprintf("%.1f s", sec)
+	case sec < 60:
+		return fmt.Sprintf("%.0f s", sec)
+	default:
+		m := int(sec) / 60
+		return fmt.Sprintf("%dm %02ds", m, int(sec)%60)
+	}
+}
+
+// Ago says how long ago a unix time was: "just now", "3 min ago", "2 h ago", "4 d ago".
+func Ago(unix int64) string {
+	d := time.Since(time.Unix(unix, 0))
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%d min ago", int(d.Minutes()))
+	case d < 48*time.Hour:
+		return fmt.Sprintf("%d h ago", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%d d ago", int(d.Hours()/24))
+	}
+}
