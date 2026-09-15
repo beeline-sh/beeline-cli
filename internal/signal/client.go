@@ -29,6 +29,7 @@ type Client struct {
 	id      string
 	Welcome Message
 	cancel  context.CancelFunc
+	early   []Message // frames that arrived before the welcome
 }
 
 func wsURL(server string) string {
@@ -51,22 +52,35 @@ func dial(ctx context.Context, server, id, query string, keys link.Keys) (*Clien
 	ws.SetReadLimit(64 << 10)
 	c := &Client{ws: ws, keys: keys, id: id}
 
+	// The welcome should be first, but frames such as peer-join can be
+	// enqueued for a host right on join; keep them for Recv rather than
+	// treating them as a protocol error.
 	wctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	var m Message
-	if err := wsjson.Read(wctx, ws, &m); err != nil {
-		ws.Close(websocket.StatusProtocolError, "no welcome")
-		return nil, fmt.Errorf("signaling: %w", err)
+	for i := 0; i < 32; i++ {
+		var m Message
+		if err := wsjson.Read(wctx, ws, &m); err != nil {
+			ws.Close(websocket.StatusProtocolError, "no welcome")
+			return nil, fmt.Errorf("signaling: %w", err)
+		}
+		switch m.T {
+		case "error":
+			ws.Close(websocket.StatusNormalClosure, "")
+			return nil, &Error{Code: m.Code, Message: m.Msg}
+		case "welcome":
+			c.Welcome = m
+		case "pong":
+		default:
+			c.early = append(c.early, m)
+		}
+		if c.Welcome.T == "welcome" {
+			break
+		}
 	}
-	if m.T == "error" {
-		ws.Close(websocket.StatusNormalClosure, "")
-		return nil, &Error{Code: m.Code, Message: m.Msg}
-	}
-	if m.T != "welcome" {
+	if c.Welcome.T != "welcome" {
 		ws.Close(websocket.StatusProtocolError, "expected welcome")
 		return nil, errors.New("signaling: expected welcome")
 	}
-	c.Welcome = m
 
 	pctx, pcancel := context.WithCancel(context.Background())
 	c.cancel = pcancel
@@ -107,6 +121,11 @@ const readTimeout = 75 * time.Second
 
 // Recv returns the next non-pong frame. Server error frames are returned as *Error.
 func (c *Client) Recv(ctx context.Context) (Message, error) {
+	if len(c.early) > 0 {
+		m := c.early[0]
+		c.early = c.early[1:]
+		return m, nil
+	}
 	for {
 		var m Message
 		rctx, cancel := context.WithTimeout(ctx, readTimeout)
