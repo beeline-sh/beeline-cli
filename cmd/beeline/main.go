@@ -205,7 +205,7 @@ func cmdShare(ctx context.Context, cfg config.Config, args []string) error {
 	expires := fs.String("expires", "7d", "lifetime (24h, 7d, 0 = until revoked)")
 	maxDl := fs.Int("max-downloads", 0, "stop after N completed downloads")
 	relay := fs.String("relay", cfg.Relay, "auto | never")
-	wait := fs.Bool("wait", false, "stay attached: show receivers live, ctrl-c revokes the share")
+	wait := fs.Bool("wait", false, "stay attached: show receivers live; ctrl-c revokes, d detaches")
 	if err := parseArgs(fs, args); err != nil {
 		return err
 	}

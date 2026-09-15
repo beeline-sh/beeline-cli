@@ -20,7 +20,7 @@ $ beeline get https://beeline.sh/m3xq8a#Hd7pKw2nRt5sVb1xZt4gPm -o ~/Downloads
 
 | command | what |
 |---|---|
-| `beeline share <path\|-> [--name N] [--expires 24h\|7d\|0] [--max-downloads N] [--relay auto\|never] [--wait]` | Register the path and print the link. `-` spools stdin to `~/.beeline/spool` first (v1 needs a size). Starts the daemon if it is not running. `--wait` keeps the terminal attached, shows receivers live, and revokes the share on ctrl-c. |
+| `beeline share <path\|-> [--name N] [--expires 24h\|7d\|0] [--max-downloads N] [--relay auto\|never] [--wait]` | Register the path and print the link. `-` spools stdin to `~/.beeline/spool` first (v1 needs a size). Starts the daemon if it is not running. `--wait` keeps the terminal attached and shows receivers live: ctrl-c revokes the share, `d` (or ctrl-b) detaches and leaves it running in the background. |
 | `beeline get <link> [-o DIR]` | Receive in-process. Resumes from `<dest>.beeline-part` if present. |
 | `beeline ls` | Active shares, peers, transport, progress, speed. |
 | `beeline revoke <id>` / `beeline revoke all` | Stop serving now. |
