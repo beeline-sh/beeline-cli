@@ -110,6 +110,9 @@ func (c *Client) Recv(ctx context.Context) (Message, error) {
 		case "pong":
 			continue
 		case "error":
+			if m.Code == "unroutable" {
+				continue // the other side is not connected right now; peer-join / host-online follows
+			}
 			return m, &Error{Code: m.Code, Message: m.Msg}
 		}
 		return m, nil
