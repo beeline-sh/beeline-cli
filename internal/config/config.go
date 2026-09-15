@@ -5,11 +5,24 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
+	"strings"
 )
 
 // Version is overridden at release time with -ldflags "-X go.beeline.sh/cli/internal/config.Version=X.Y.Z".
+// A `go install go.beeline.sh/cli/cmd/beeline@vX.Y.Z` build has no ldflags, so
+// the module version from the build info is used instead.
 var Version = "0.1.0"
+
+func init() {
+	if Version != "0.1.0" {
+		return
+	}
+	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		Version = strings.TrimPrefix(bi.Main.Version, "v")
+	}
+}
 
 const (
 	DefaultServer = "https://beeline.sh"
