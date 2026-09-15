@@ -23,7 +23,7 @@ $ beeline get https://beeline.sh/m3xq8a#Hd7pKw2nRt5sVb1xZt4gPm -o ~/Downloads
 | `beeline share <path\|-> [--name N] [--expires 24h\|7d\|0] [--max-downloads N] [--relay auto\|never]` | Register the path and print the link. `-` spools stdin to `~/.beeline/spool` first (v1 needs a size). Starts the daemon if it is not running. |
 | `beeline get <link> [-o DIR]` | Receive in-process. Resumes from `<dest>.beeline-part` if present. |
 | `beeline ls` | Active shares, peers, transport, progress, speed. |
-| `beeline revoke <id>` | Stop serving now. |
+| `beeline revoke <id>` / `beeline revoke all` | Stop serving now. |
 | `beeline daemon` | Run the daemon in the foreground. |
 | `beeline mcp` | MCP server over stdio (tools `share_file`, `share_text`, `receive`, `list_shares`, `revoke`). |
 

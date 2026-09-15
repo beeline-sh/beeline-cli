@@ -29,7 +29,7 @@ usage:
   beeline share <path|-> [--name N] [--expires 24h|7d|0] [--max-downloads N] [--relay auto|never]
   beeline get <link> [-o DIR]
   beeline ls
-  beeline revoke <id>
+  beeline revoke <id>|all
   beeline daemon
   beeline mcp
   beeline version
@@ -227,12 +227,30 @@ func cmdLs(ctx context.Context, cfg config.Config) error {
 
 func cmdRevoke(ctx context.Context, cfg config.Config, args []string) error {
 	if len(args) != 1 {
-		return errors.New("usage: beeline revoke <id>")
+		return errors.New("usage: beeline revoke <id>|all")
 	}
-	if err := daemon.Dial(cfg.Socket).Revoke(ctx, args[0]); err != nil {
+	dc := daemon.Dial(cfg.Socket)
+	if args[0] != "all" {
+		if err := dc.Revoke(ctx, args[0]); err != nil {
+			return err
+		}
+		fmt.Printf("  revoked %s\n", args[0])
+		return nil
+	}
+	shares, err := dc.Shares(ctx)
+	if err != nil {
 		return err
 	}
-	fmt.Printf("  revoked %s\n", args[0])
+	if len(shares) == 0 {
+		fmt.Println("  nothing shared")
+		return nil
+	}
+	for _, s := range shares {
+		if err := dc.Revoke(ctx, s.ID); err != nil {
+			return fmt.Errorf("revoke %s: %w", s.ID, err)
+		}
+		fmt.Printf("  revoked %s  %s\n", s.ID, s.Name)
+	}
 	return nil
 }
 
