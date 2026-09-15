@@ -145,12 +145,19 @@ func (h *Host) resume(ctx context.Context, s Saved) resumeResult {
 	return transient
 }
 
+// retryPending keeps trying to re-host shares the server could not be
+// reached for: every 15 s at first, then every minute for as long as the
+// daemon runs. A share is only given up when the server says it is gone.
 func (h *Host) retryPending(ctx context.Context) {
-	for attempt := 0; attempt < 6; attempt++ {
+	for attempt := 0; ; attempt++ {
+		wait := 15 * time.Second
+		if attempt >= 6 {
+			wait = time.Minute
+		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(15 * time.Second):
+		case <-time.After(wait):
 		}
 		h.mu.Lock()
 		todo := h.pending
