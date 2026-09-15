@@ -249,6 +249,12 @@ func (sh *Share) loop(ctx context.Context) {
 			case "not-found", "gone", "unauthorized":
 				_ = sh.h.Remove(sh.ID, "gone")
 				return
+			case "replaced":
+				// Another daemon (same user, another machine or a second
+				// instance) is now hosting this share; reconnecting would only
+				// make the two kick each other off forever.
+				_ = sh.h.Remove(sh.ID, "replaced by another daemon")
+				return
 			}
 		}
 		sh.h.log.Printf("share %s: signaling lost (%v), reconnecting", sh.ID, err)
