@@ -8,8 +8,10 @@ import (
 	"strconv"
 )
 
+// Version is overridden at release time with -ldflags "-X go.beeline.sh/cli/internal/config.Version=X.Y.Z".
+var Version = "0.1.0"
+
 const (
-	Version       = "0.1.0"
 	DefaultServer = "https://beeline.sh"
 	DefaultPort   = 41820
 )
