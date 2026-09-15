@@ -20,12 +20,12 @@ $ beeline get https://beeline.sh/m3xq8a#Hd7pKw2nRt5sVb1xZt4gPm -o ~/Downloads
 
 | command | what |
 |---|---|
-| `beeline share <path\|-> [--name N] [--expires 24h\|7d\|0] [--max-downloads N] [--relay auto\|never]` | Register the path and print the link. `-` spools stdin to `~/.beeline/spool` first (v1 needs a size). Starts the daemon if it is not running. |
+| `beeline share <path\|-> [--name N] [--expires 24h\|7d\|0] [--max-downloads N] [--relay auto\|never] [--wait]` | Register the path and print the link. `-` spools stdin to `~/.beeline/spool` first (v1 needs a size). Starts the daemon if it is not running. `--wait` keeps the terminal attached, shows receivers live, and revokes the share on ctrl-c. |
 | `beeline get <link> [-o DIR]` | Receive in-process. Resumes from `<dest>.beeline-part` if present. |
 | `beeline ls` | Active shares, peers, transport, progress, speed. |
 | `beeline revoke <id>` / `beeline revoke all` | Stop serving now. |
 | `beeline daemon` | Run the daemon in the foreground. |
-| `beeline daemon stop` / `restart` / `status` | Control the background daemon. Shares are persisted in `~/.beeline/shares.json` and come back after a restart. |
+| `beeline daemon stop` / `restart` / `status` | Control the background daemon. Shares are persisted in `~/.beeline/shares.json` and come back after a restart. `status` includes the router port mapping. |
 | `beeline update` | Install the latest release over this binary (checksum verified) and restart the daemon. `BEELINE_VERSION=vX.Y.Z` pins a release. |
 | `beeline mcp` | MCP server over stdio (tools `share_file`, `share_text`, `receive`, `list_shares`, `revoke`). |
 
@@ -36,6 +36,12 @@ Daemon socket: `$XDG_RUNTIME_DIR/beeline.sock` (else `~/.beeline/beeline.sock`).
 Daemon log: `~/.beeline/daemon.log`. `share`, `get`, `ls` and `revoke` check
 for a newer release at most once a day and print a one-line hint;
 `BEELINE_NO_UPDATE_CHECK=1` turns that off.
+
+The daemon asks the router (UPnP IGD or NAT-PMP/PCP) to forward its UDP
+port, so browsers behind the internet can reach it over WebTransport even
+when the NAT is port-restricted; `beeline daemon status` shows the result.
+Without a cooperative router, forward the UDP port by hand or the browser
+side falls back to WebRTC. `BEELINE_NO_PORTMAP=1` disables the request.
 
 MCP registration (Claude Code `.mcp.json`):
 
@@ -77,6 +83,10 @@ STUN and hole-punch datagrams go through the same socket, so the address
 advertised to peers is the one they can reach. The WebTransport certificate
 is ECDSA P-256 with 13-day validity (`transport/cert.go`), rotated by the
 daemon a day before expiry.
+
+Every incoming QUIC/WebTransport stream must start with a valid `AUTH`
+frame derived from the link key before anything is served; a source
+address that fails ten times within a minute is refused for a minute.
 
 ## Not yet
 

@@ -27,7 +27,7 @@ import (
 const usageText = `beeline - files go straight from your device to theirs
 
 usage:
-  beeline share <path|-> [--name N] [--expires 24h|7d|0] [--max-downloads N] [--relay auto|never]
+  beeline share <path|-> [--name N] [--expires 24h|7d|0] [--max-downloads N] [--relay auto|never] [--wait]
   beeline get <link> [-o DIR]
   beeline ls
   beeline revoke <id>|all
@@ -42,6 +42,7 @@ environment:
   BEELINE_RELAY             auto | never
   BEELINE_VERSION           pin the update command to a release (vX.Y.Z)
   BEELINE_NO_UPDATE_CHECK   1 disables the daily check for a newer version
+  BEELINE_NO_PORTMAP        1 disables UPnP/NAT-PMP port mapping on the router
 `
 
 func main() {
@@ -114,6 +115,11 @@ func cmdDaemon(ctx context.Context, cfg config.Config, args []string) error {
 			fmt.Print(" · re-hosting")
 		}
 		fmt.Println()
+		if st.PortMapping.External != "" {
+			fmt.Printf("  port mapping: %s %s\n", st.PortMapping.Kind, st.PortMapping.External)
+		} else {
+			fmt.Printf("  port mapping: none (forward UDP %d to this machine for browser transfers)\n", st.Port)
+		}
 		return nil
 	case "stop":
 		was, err := daemon.Stop(ctx, cfg)
@@ -199,6 +205,7 @@ func cmdShare(ctx context.Context, cfg config.Config, args []string) error {
 	expires := fs.String("expires", "7d", "lifetime (24h, 7d, 0 = until revoked)")
 	maxDl := fs.Int("max-downloads", 0, "stop after N completed downloads")
 	relay := fs.String("relay", cfg.Relay, "auto | never")
+	wait := fs.Bool("wait", false, "stay attached: show receivers live, ctrl-c revokes the share")
 	if err := parseArgs(fs, args); err != nil {
 		return err
 	}
@@ -241,14 +248,21 @@ func cmdShare(ctx context.Context, cfg config.Config, args []string) error {
 	}
 	fmt.Printf("  %s\n", info.Link)
 	var notes []string
-	notes = append(notes, "serving in the background · beeline ls to see it")
+	if !*wait {
+		notes = append(notes, "serving in the background · beeline ls to see it")
+	}
 	if info.ExpiresAt > 0 {
 		notes = append(notes, "expires in "+shortDur(time.Until(time.Unix(info.ExpiresAt, 0))))
 	}
 	if info.DownloadsLeft > 0 {
 		notes = append(notes, fmt.Sprintf("up to %d downloads", info.DownloadsLeft))
 	}
-	fmt.Printf("  %s\n", strings.Join(notes, " · "))
+	if len(notes) > 0 {
+		fmt.Printf("  %s\n", strings.Join(notes, " · "))
+	}
+	if *wait {
+		return waitShare(ctx, cfg, dc, info.ID)
+	}
 	return nil
 }
 
