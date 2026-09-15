@@ -25,11 +25,13 @@ import (
 
 // Status is GET /status.
 type Status struct {
-	Version string `json:"version"`
-	Server  string `json:"server"`
-	UptimeS int64  `json:"uptime_s"`
-	Port    int    `json:"port"`
-	PID     int    `json:"pid"`
+	Version   string `json:"version"`
+	Server    string `json:"server"`
+	UptimeS   int64  `json:"uptime_s"`
+	Port      int    `json:"port"`
+	PID       int    `json:"pid"`
+	Shares    int    `json:"shares"`
+	Restoring bool   `json:"restoring"` // still re-hosting shares from the previous run
 }
 
 // ShareRequest is POST /shares.
@@ -60,10 +62,12 @@ type Server struct {
 	host  *host.Host
 	start time.Time
 	log   *log.Logger
+	stop  context.CancelFunc
 
-	mu   sync.Mutex
-	jobs map[string]*job
-	subs map[chan string]struct{}
+	mu        sync.Mutex
+	jobs      map[string]*job
+	subs      map[chan string]struct{}
+	restoring bool
 }
 
 // Run serves until ctx ends. It refuses to start if another daemon answers on the socket.
@@ -87,16 +91,30 @@ func Run(ctx context.Context, cfg config.Config) error {
 	}
 	_ = os.Chmod(cfg.Socket, 0o600)
 
-	s := &Server{cfg: cfg, host: h, start: time.Now(), log: logger, jobs: map[string]*job{}, subs: map[chan string]struct{}{}}
+	rctx, rcancel := context.WithCancel(ctx)
+	defer rcancel()
+	s := &Server{cfg: cfg, host: h, start: time.Now(), log: logger, stop: rcancel, jobs: map[string]*job{}, subs: map[chan string]struct{}{}, restoring: true}
 	srv := &http.Server{Handler: s.routes()}
-	go s.ticker(ctx)
+	go s.ticker(rctx)
 	go func() {
-		<-ctx.Done()
+		<-rctx.Done()
 		sctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(sctx)
 	}()
-	logger.Printf("beeline daemon %s on %s (server %s)", config.Version, cfg.Socket, cfg.Server)
+	go func() {
+		// Re-host what the previous run was serving; the socket answers
+		// meanwhile so `beeline share` never waits for it.
+		n := h.Restore(rctx)
+		s.mu.Lock()
+		s.restoring = false
+		s.mu.Unlock()
+		if n > 0 {
+			logger.Printf("re-hosted %d share(s)", n)
+		}
+		s.publish()
+	}()
+	logger.Printf("beeline daemon %s (pid %d) on %s (server %s)", config.Version, os.Getpid(), cfg.Socket, cfg.Server)
 	err = srv.Serve(ln)
 	h.Close()
 	_ = os.Remove(cfg.Socket)
@@ -109,6 +127,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /status", s.status)
+	mux.HandleFunc("POST /shutdown", s.shutdown)
 	mux.HandleFunc("GET /shares", s.listShares)
 	mux.HandleFunc("POST /shares", s.addShare)
 	mux.HandleFunc("DELETE /shares/{id}", s.revoke)
@@ -129,7 +148,24 @@ func writeErr(w http.ResponseWriter, code int, err error) {
 }
 
 func (s *Server) status(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, Status{Version: config.Version, Server: s.cfg.Server, UptimeS: int64(time.Since(s.start).Seconds()), Port: s.host.Port(), PID: os.Getpid()})
+	s.mu.Lock()
+	restoring := s.restoring
+	s.mu.Unlock()
+	writeJSON(w, 200, Status{
+		Version: config.Version, Server: s.cfg.Server, UptimeS: int64(time.Since(s.start).Seconds()),
+		Port: s.host.Port(), PID: os.Getpid(), Shares: len(s.host.List()), Restoring: restoring,
+	})
+}
+
+// shutdown exits after replying. Shares are not revoked: they are persisted
+// and re-hosted by the next daemon (`beeline daemon restart`, `beeline update`).
+func (s *Server) shutdown(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(204)
+	s.log.Printf("shutdown requested")
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		s.stop()
+	}()
 }
 
 func (s *Server) snapshot() []host.Info {

@@ -110,43 +110,97 @@ func newShare(ctx context.Context, h *Host, path string, opts Options) (*Share, 
 	if err != nil {
 		return nil, err
 	}
-	keys, err := link.Derive(key)
-	if err != nil {
-		return nil, err
-	}
 	resp, err := h.api.CreateShare(ctx, opts.ExpiresIn)
 	if err != nil {
 		src.Close()
 		return nil, err
 	}
-	sh := &Share{
-		ID: resp.ID, Token: resp.Token,
-		Link:      link.Link{Server: h.cfg.Server, ID: resp.ID, Key: key},
-		Src:       src, Opts: opts, ExpiresAt: resp.ExpiresAt, CreatedAt: time.Now(),
-		h:         h, keys: keys,
-		downloadsLeft: -1,
-		peers:         map[string]*peerState{},
-		sessions:      map[*session]struct{}{},
-	}
+	left := -1
 	if opts.MaxDownloads > 0 {
-		sh.downloadsLeft = opts.MaxDownloads
+		left = opts.MaxDownloads
 	}
-	sig, err := signal.DialHost(ctx, h.cfg.Server, sh.ID, sh.Token, keys)
+	sh, err := assemble(h, src, opts, resp.ID, resp.Token, key, resp.ExpiresAt, time.Now(), left)
 	if err != nil {
+		src.Close()
+		return nil, err
+	}
+	if err := sh.start(ctx); err != nil {
 		src.Close()
 		_ = h.api.DeleteShare(context.Background(), sh.ID, sh.Token)
 		return nil, err
 	}
+	return sh, nil
+}
+
+// resumeShare re-hosts a share persisted by an earlier daemon run: the
+// server already knows the id, so only the signaling connection is redone.
+func resumeShare(ctx context.Context, h *Host, s Saved) (*Share, error) {
+	src, err := manifest.FromPath(s.Path, s.Name)
+	if err != nil {
+		return nil, err
+	}
+	key, err := base64.StdEncoding.DecodeString(s.Key)
+	if err != nil {
+		src.Close()
+		return nil, err
+	}
+	opts := Options{Name: s.Name, ExpiresIn: time.Duration(s.ExpiresIn) * time.Second, MaxDownloads: s.MaxDownloads, Relay: s.Relay}
+	sh, err := assemble(h, src, opts, s.ID, s.Token, key, s.ExpiresAt, time.Unix(s.CreatedAt, 0), s.DownloadsLeft)
+	if err != nil {
+		src.Close()
+		return nil, err
+	}
+	if err := sh.start(ctx); err != nil {
+		src.Close()
+		return nil, err
+	}
+	return sh, nil
+}
+
+func assemble(h *Host, src *manifest.Source, opts Options, id, token string, key []byte, expiresAt int64, createdAt time.Time, left int) (*Share, error) {
+	keys, err := link.Derive(key)
+	if err != nil {
+		return nil, err
+	}
+	return &Share{
+		ID: id, Token: token,
+		Link: link.Link{Server: h.cfg.Server, ID: id, Key: key},
+		Src:  src, Opts: opts, ExpiresAt: expiresAt, CreatedAt: createdAt,
+		h: h, keys: keys,
+		downloadsLeft: left,
+		peers:         map[string]*peerState{},
+		sessions:      map[*session]struct{}{},
+	}, nil
+}
+
+// start opens signaling and begins serving.
+func (sh *Share) start(ctx context.Context) error {
+	sig, err := signal.DialHost(ctx, sh.h.cfg.Server, sh.ID, sh.Token, sh.keys)
+	if err != nil {
+		return err
+	}
 	sh.sig = sig
-	sctx, cancel := context.WithCancel(h.ctx)
+	sctx, cancel := context.WithCancel(sh.h.ctx)
 	sh.cancel = cancel
 	if sh.ExpiresAt > 0 {
 		if d := time.Until(time.Unix(sh.ExpiresAt, 0)); d > 0 {
-			sh.expiry = time.AfterFunc(d, func() { _ = h.Remove(sh.ID, "expired") })
+			sh.expiry = time.AfterFunc(d, func() { _ = sh.h.Remove(sh.ID, "expired") })
 		}
 	}
 	go sh.loop(sctx)
-	return sh, nil
+	return nil
+}
+
+// saved is the persisted form of the share (see store.go).
+func (sh *Share) saved() Saved {
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
+	return Saved{
+		ID: sh.ID, Token: sh.Token, Key: base64.StdEncoding.EncodeToString(sh.Link.Key),
+		Path: sh.Src.Path, Name: sh.Opts.Name,
+		ExpiresIn: int64(sh.Opts.ExpiresIn.Seconds()), MaxDownloads: sh.Opts.MaxDownloads, Relay: sh.Opts.Relay,
+		ExpiresAt: sh.ExpiresAt, CreatedAt: sh.CreatedAt.Unix(), DownloadsLeft: sh.downloadsLeft,
+	}
 }
 
 func (sh *Share) exhausted() bool {
@@ -459,6 +513,7 @@ func (sh *Share) completed() {
 	}
 	last := sh.downloadsLeft == 0
 	sh.mu.Unlock()
+	sh.h.save()
 	if last {
 		// Give the receiver time to read DONE before the share disappears.
 		time.AfterFunc(5*time.Second, func() { _ = sh.h.Remove(sh.ID, "done") })

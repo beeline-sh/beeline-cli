@@ -76,13 +76,13 @@ type Transports struct {
 }
 
 type Manifest struct {
-	K             string     `json:"k"`
-	Name          string     `json:"name"`
-	Size          int64      `json:"size"`
-	Chunk         int        `json:"chunk"`
-	Hash          string     `json:"hash"`
-	Files         []File     `json:"files"`
-	Transports    Transports `json:"transports"`
+	K          string     `json:"k"`
+	Name       string     `json:"name"`
+	Size       int64      `json:"size"`
+	Chunk      int        `json:"chunk"`
+	Hash       string     `json:"hash"`
+	Files      []File     `json:"files"`
+	Transports Transports `json:"transports"`
 	// Dial is set by a host that will dial the peer's hello.listen itself.
 	Dial          bool  `json:"dial,omitempty"`
 	ExpiresAt     int64 `json:"expires_at"`

@@ -21,6 +21,7 @@ import (
 	"go.beeline.sh/cli/internal/mcp"
 	"go.beeline.sh/cli/internal/peer"
 	"go.beeline.sh/cli/internal/ui"
+	"go.beeline.sh/cli/internal/update"
 )
 
 const usageText = `beeline - files go straight from your device to theirs
@@ -30,14 +31,17 @@ usage:
   beeline get <link> [-o DIR]
   beeline ls
   beeline revoke <id>|all
-  beeline daemon
+  beeline daemon [stop|restart|status]
+  beeline update
   beeline mcp
   beeline version
 
 environment:
-  BEELINE_SERVER   introduction server (default https://beeline.sh)
-  BEELINE_PORT     UDP port for the daemon (default 41820)
-  BEELINE_RELAY    auto | never
+  BEELINE_SERVER            introduction server (default https://beeline.sh)
+  BEELINE_PORT              UDP port for the daemon (default 41820)
+  BEELINE_RELAY             auto | never
+  BEELINE_VERSION           pin the update command to a release (vX.Y.Z)
+  BEELINE_NO_UPDATE_CHECK   1 disables the daily check for a newer version
 `
 
 func main() {
@@ -48,6 +52,14 @@ func main() {
 	cfg := config.Load()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// Everyday commands look for a newer release in the background and
+	// mention it after their own output.
+	latest := func() string { return "" }
+	switch os.Args[1] {
+	case "share", "get", "ls", "revoke":
+		latest = update.Check(ctx, 1500*time.Millisecond)
+	}
 
 	var err error
 	switch os.Args[1] {
@@ -60,7 +72,9 @@ func main() {
 	case "revoke":
 		err = cmdRevoke(ctx, cfg, os.Args[2:])
 	case "daemon":
-		err = daemon.Run(ctx, cfg)
+		err = cmdDaemon(ctx, cfg, os.Args[2:])
+	case "update":
+		err = cmdUpdate(ctx, cfg)
 	case "mcp":
 		err = mcp.Run(ctx, cfg)
 	case "version":
@@ -78,6 +92,105 @@ func main() {
 		fmt.Fprintln(os.Stderr, "beeline:", err)
 		os.Exit(1)
 	}
+	if tag := latest(); tag != "" && update.Newer(config.Version, tag) {
+		fmt.Fprintf(os.Stderr, "  beeline %s is available, run: beeline update\n", strings.TrimPrefix(tag, "v"))
+	}
+}
+
+func cmdDaemon(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) == 0 {
+		return daemon.Run(ctx, cfg)
+	}
+	dc := daemon.Dial(cfg.Socket)
+	switch args[0] {
+	case "status":
+		st, err := dc.Status(ctx)
+		if err != nil {
+			fmt.Println("  not running")
+			return nil
+		}
+		fmt.Printf("  beeline %s · pid %d · up %s · %d share(s)", st.Version, st.PID, shortDur(time.Duration(st.UptimeS)*time.Second), st.Shares)
+		if st.Restoring {
+			fmt.Print(" · re-hosting")
+		}
+		fmt.Println()
+		return nil
+	case "stop":
+		was, err := daemon.Stop(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		if !was {
+			fmt.Println("  not running")
+			return nil
+		}
+		fmt.Println("  stopped · shares are kept and come back with the next daemon")
+		return nil
+	case "restart":
+		exe, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		return restartDaemon(ctx, cfg, exe)
+	default:
+		return fmt.Errorf("usage: beeline daemon [stop|restart|status]")
+	}
+}
+
+// restartDaemon stops the running daemon (if any) and starts exe, then
+// reports how many shares came back from ~/.beeline/shares.json.
+func restartDaemon(ctx context.Context, cfg config.Config, exe string) error {
+	if _, err := daemon.Stop(ctx, cfg); err != nil {
+		return err
+	}
+	dc, err := daemon.Start(ctx, cfg, exe)
+	if err != nil {
+		return err
+	}
+	st, err := dc.WaitRestored(ctx, 20*time.Second)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("  daemon restarted, %d share(s) re-hosted\n", st.Shares)
+	return nil
+}
+
+func cmdUpdate(ctx context.Context, cfg config.Config) error {
+	var rel update.Release
+	var err error
+	pinned := os.Getenv("BEELINE_VERSION")
+	if pinned != "" {
+		rel, err = update.Latest(ctx, 10*time.Second)
+		if err != nil {
+			return err
+		}
+		if rel.Tag != pinned {
+			// Not the latest: build the asset list from the release URL pattern.
+			rel = update.Release{Tag: pinned, Assets: map[string]string{}}
+			base := "https://github.com/beeline-sh/beeline-cli/releases/download/" + pinned + "/"
+			rel.Assets[update.AssetName(pinned)] = base + update.AssetName(pinned)
+			rel.Assets["checksums.txt"] = base + "checksums.txt"
+		}
+	} else {
+		rel, err = update.Latest(ctx, 10*time.Second)
+		if err != nil {
+			return fmt.Errorf("checking for updates: %w", err)
+		}
+		if !update.Newer(config.Version, rel.Tag) {
+			fmt.Printf("  beeline %s is the latest\n", config.Version)
+			return nil
+		}
+	}
+	fmt.Printf("  downloading beeline %s...\n", strings.TrimPrefix(rel.Tag, "v"))
+	exe, err := update.Apply(ctx, rel)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("  updated to %s\n", strings.TrimPrefix(rel.Tag, "v"))
+	if _, err := daemon.Dial(cfg.Socket).Status(ctx); err == nil {
+		return restartDaemon(ctx, cfg, exe)
+	}
+	return nil
 }
 
 func cmdShare(ctx context.Context, cfg config.Config, args []string) error {

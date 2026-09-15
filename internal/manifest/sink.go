@@ -120,11 +120,11 @@ func (s *Sink) SaveSidecar() error {
 	return os.Rename(tmp, s.sidecar)
 }
 
-func (s *Sink) has(i int) bool  { return s.bitmap[i/8]&(1<<(i%8)) != 0 }
-func (s *Sink) set(i int)       { s.bitmap[i/8] |= 1 << (i % 8) }
-func (s *Sink) clear(i int)     { s.bitmap[i/8] &^= 1 << (i % 8) }
-func (s *Sink) Has(i int) bool  { s.mu.Lock(); defer s.mu.Unlock(); return s.has(i) }
-func (s *Sink) Received() int   { s.mu.Lock(); defer s.mu.Unlock(); return s.received }
+func (s *Sink) has(i int) bool { return s.bitmap[i/8]&(1<<(i%8)) != 0 }
+func (s *Sink) set(i int)      { s.bitmap[i/8] |= 1 << (i % 8) }
+func (s *Sink) clear(i int)    { s.bitmap[i/8] &^= 1 << (i % 8) }
+func (s *Sink) Has(i int) bool { s.mu.Lock(); defer s.mu.Unlock(); return s.has(i) }
+func (s *Sink) Received() int  { s.mu.Lock(); defer s.mu.Unlock(); return s.received }
 func (s *Sink) ReceivedBytes() int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()

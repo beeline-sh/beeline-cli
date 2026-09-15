@@ -38,6 +38,7 @@ type Host struct {
 	ice        []signal.ICEServer
 	publicAddr string
 	shares     map[string]*Share
+	pending    []Saved // persisted shares not yet re-hosted (see store.go)
 }
 
 // New binds the endpoint, generates a certificate and starts serving.
@@ -200,6 +201,7 @@ func (h *Host) Add(ctx context.Context, path string, opts Options) (*Share, erro
 	h.mu.Lock()
 	h.shares[sh.ID] = sh
 	h.mu.Unlock()
+	h.save()
 	h.log.Printf("share %s: %s (%d bytes)", sh.ID, sh.Src.Name, sh.Src.Size)
 	return sh, nil
 }
@@ -237,6 +239,7 @@ func (h *Host) Remove(id, reason string) error {
 		return errors.New("no such share")
 	}
 	sh.stop(reason)
+	h.save()
 	h.log.Printf("share %s: %s", id, reason)
 	return nil
 }

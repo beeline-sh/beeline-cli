@@ -25,13 +25,17 @@ $ beeline get https://beeline.sh/m3xq8a#Hd7pKw2nRt5sVb1xZt4gPm -o ~/Downloads
 | `beeline ls` | Active shares, peers, transport, progress, speed. |
 | `beeline revoke <id>` / `beeline revoke all` | Stop serving now. |
 | `beeline daemon` | Run the daemon in the foreground. |
+| `beeline daemon stop` / `restart` / `status` | Control the background daemon. Shares are persisted in `~/.beeline/shares.json` and come back after a restart. |
+| `beeline update` | Install the latest release over this binary (checksum verified) and restart the daemon. `BEELINE_VERSION=vX.Y.Z` pins a release. |
 | `beeline mcp` | MCP server over stdio (tools `share_file`, `share_text`, `receive`, `list_shares`, `revoke`). |
 
 Config: `BEELINE_SERVER` (default `https://beeline.sh`), `BEELINE_PORT` (UDP,
 default 41820, falls back to a random port), `BEELINE_RELAY`, `BEELINE_SOCKET`;
 or `~/.config/beeline/config.json` with `server`, `port`, `relay`, `socket`.
 Daemon socket: `$XDG_RUNTIME_DIR/beeline.sock` (else `~/.beeline/beeline.sock`).
-Daemon log: `~/.beeline/daemon.log`.
+Daemon log: `~/.beeline/daemon.log`. `share`, `get`, `ls` and `revoke` check
+for a newer release at most once a day and print a one-line hint;
+`BEELINE_NO_UPDATE_CHECK=1` turns that off.
 
 MCP registration (Claude Code `.mcp.json`):
 
